@@ -1,0 +1,533 @@
+name: CineVerse CI/CD Pipeline
+
+# ─── TRIGGERS ─────────────────────────────────────────────────────────────────
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:        # Manual trigger from GitHub UI
+
+# ─── GLOBAL ENV ───────────────────────────────────────────────────────────────
+env:
+  REGISTRY: ghcr.io
+  IMAGE_ORG: ${{ github.repository_owner }}
+
+# Cancel in-progress runs on the same branch (saves CI minutes)
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  JOB 1 — Detect which services changed (skip unchanged builds)
+# ══════════════════════════════════════════════════════════════════════════════
+  detect-changes:
+    name: Detect Changed Services
+    runs-on: ubuntu-latest
+    outputs:
+      auth:     ${{ steps.changes.outputs.auth }}
+      movie:    ${{ steps.changes.outputs.movie }}
+      review:   ${{ steps.changes.outputs.review }}
+      gateway:  ${{ steps.changes.outputs.gateway }}
+      frontend: ${{ steps.changes.outputs.frontend }}
+      static:   ${{ steps.changes.outputs.static }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check changed paths
+        id: changes
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            auth:
+              - 'auth-service/**'
+            movie:
+              - 'movie-service/**'
+            review:
+              - 'review-service/**'
+            gateway:
+              - 'api-gateway/**'
+            frontend:
+              - 'frontend/**'
+            static:
+              - 'frontend-static/**'
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  JOB 2 — Lint & Validate
+# ══════════════════════════════════════════════════════════════════════════════
+  lint:
+    name: Lint & Validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate docker-compose.yml
+        run: docker compose config --quiet
+
+      - name: Check for secrets accidentally committed
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: ${{ github.event.repository.default_branch }}
+          head: HEAD
+        continue-on-error: true   # Warn, don't fail on first run
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  JOB 3 — Test Auth Service
+# ══════════════════════════════════════════════════════════════════════════════
+  test-auth:
+    name: Test Auth Service
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.auth == 'true' || github.ref == 'refs/heads/main'
+
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_DB: auth_db_test
+          POSTGRES_USER: cineverse
+          POSTGRES_PASSWORD: cineverse_pass
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    defaults:
+      run:
+        working-directory: auth-service
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: maven
+
+      - name: Run unit & integration tests
+        run: ./mvnw test -B
+        env:
+          SPRING_DATASOURCE_URL: jdbc:postgresql://localhost:5432/auth_db_test
+          SPRING_DATASOURCE_USERNAME: cineverse
+          SPRING_DATASOURCE_PASSWORD: cineverse_pass
+          SPRING_DATA_REDIS_HOST: localhost
+          SPRING_DATA_REDIS_PORT: 6379
+          JWT_SECRET: test-secret-key-for-ci-only-not-production
+          JWT_EXPIRY_MS: 86400000
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: auth-test-results
+          path: auth-service/target/surefire-reports/
+          retention-days: 7
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  JOB 4 — Test Movie Service
+# ══════════════════════════════════════════════════════════════════════════════
+  test-movie:
+    name: Test Movie Service
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.movie == 'true' || github.ref == 'refs/heads/main'
+
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_DB: movies_db_test
+          POSTGRES_USER: cineverse
+          POSTGRES_PASSWORD: cineverse_pass
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+
+    defaults:
+      run:
+        working-directory: movie-service
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: maven
+
+      - name: Run tests
+        run: ./mvnw test -B
+        env:
+          SPRING_DATASOURCE_URL: jdbc:postgresql://localhost:5432/movies_db_test
+          SPRING_DATASOURCE_USERNAME: cineverse
+          SPRING_DATASOURCE_PASSWORD: cineverse_pass
+          SPRING_DATA_REDIS_HOST: localhost
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: movie-test-results
+          path: movie-service/target/surefire-reports/
+          retention-days: 7
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  JOB 5 — Test Review Service
+# ══════════════════════════════════════════════════════════════════════════════
+  test-review:
+    name: Test Review Service
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.review == 'true' || github.ref == 'refs/heads/main'
+
+    services:
+      mongodb:
+        image: mongo:6
+        env:
+          MONGO_INITDB_ROOT_USERNAME: cineverse
+          MONGO_INITDB_ROOT_PASSWORD: cineverse_pass
+          MONGO_INITDB_DATABASE: reviews_db_test
+        ports: ["27017:27017"]
+        options: >-
+          --health-cmd "mongosh --eval \"db.adminCommand('ping')\""
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    defaults:
+      run:
+        working-directory: review-service
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: maven
+
+      - name: Run tests
+        run: ./mvnw test -B
+        env:
+          SPRING_DATA_MONGODB_URI: mongodb://cineverse:cineverse_pass@localhost:27017/reviews_db_test?authSource=admin
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: review-test-results
+          path: review-service/target/surefire-reports/
+          retention-days: 7
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  JOB 6 — Test Frontend (React)
+# ══════════════════════════════════════════════════════════════════════════════
+  test-frontend:
+    name: Test & Build Frontend
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.frontend == 'true' || github.ref == 'refs/heads/main'
+
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test -- --watchAll=false --passWithNoTests --coverage
+        env:
+          CI: true
+
+      - name: Build production bundle
+        run: npm run build
+        env:
+          REACT_APP_API_BASE_URL: ${{ vars.API_BASE_URL || 'http://localhost:8080' }}
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-build
+          path: frontend/build/
+          retention-days: 7
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-coverage
+          path: frontend/coverage/
+          retention-days: 7
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  JOB 7 — Validate Static Frontend HTML
+# ══════════════════════════════════════════════════════════════════════════════
+  validate-static:
+    name: Validate Static Frontend
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.static == 'true' || github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check HTML file exists
+        run: |
+          test -f frontend-static/index.html && echo "✅ index.html found" || exit 1
+
+      - name: Validate HTML structure
+        run: |
+          python3 -c "
+          with open('frontend-static/index.html') as f:
+              content = f.read()
+          assert '<!DOCTYPE html>' in content, 'Missing DOCTYPE'
+          assert '<html' in content, 'Missing html tag'
+          assert '</body>' in content, 'Missing closing body'
+          assert 'CineVerse' in content, 'Missing app name'
+          print('✅ HTML validation passed')
+          "
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  JOB 8 — Security Scan (runs on all pushes to main)
+# ══════════════════════════════════════════════════════════════════════════════
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    needs: [test-auth, test-movie, test-review]
+    if: always() && github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Trivy vulnerability scanner on docker-compose
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: config
+          scan-ref: .
+          severity: CRITICAL,HIGH
+          exit-code: 0        # Warn only — don't fail pipeline on first run
+          format: table
+
+      - name: OWASP dependency check — Auth Service
+        uses: dependency-check/Dependency-Check_Action@main
+        with:
+          project: cineverse-auth
+          path: auth-service
+          format: HTML
+          out: reports/auth-dependency-check
+        continue-on-error: true
+
+      - name: Upload security reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-reports
+          path: reports/
+          retention-days: 30
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  JOB 9 — Build & Push Docker Images (main branch only)
+# ══════════════════════════════════════════════════════════════════════════════
+  build-images:
+    name: Build & Push Docker Images
+    runs-on: ubuntu-latest
+    needs: [test-auth, test-movie, test-review, test-frontend]
+    if: |
+      always() &&
+      github.ref == 'refs/heads/main' &&
+      !contains(needs.*.result, 'failure')
+    permissions:
+      contents: read
+      packages: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: auth-service
+            port: 8081
+          - service: movie-service
+            port: 8082
+          - service: review-service
+            port: 8083
+          - service: api-gateway
+            port: 8080
+          - service: frontend
+            port: 80
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_ORG }}/cineverse-${{ matrix.service }}
+          tags: |
+            type=sha,prefix=sha-,format=short
+            type=ref,event=branch
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./${{ matrix.service }}
+          file: ./${{ matrix.service }}/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,scope=${{ matrix.service }},mode=max
+          build-args: |
+            BUILD_DATE=${{ github.event.head_commit.timestamp }}
+            GIT_SHA=${{ github.sha }}
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  JOB 10 — Deploy Static Frontend to GitHub Pages
+# ══════════════════════════════════════════════════════════════════════════════
+  deploy-static:
+    name: Deploy Static Frontend → GitHub Pages
+    runs-on: ubuntu-latest
+    needs: validate-static
+    if: github.ref == 'refs/heads/main'
+    permissions:
+      contents: write
+      pages: write
+      id-token: write
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup GitHub Pages
+        uses: actions/configure-pages@v4
+
+      - name: Upload static site
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: frontend-static/
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  JOB 11 — Integration Tests (after images built)
+# ══════════════════════════════════════════════════════════════════════════════
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: build-images
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start full stack
+        run: |
+          docker compose up -d
+          echo "Waiting for services to be healthy..."
+          sleep 60
+
+      - name: Check all services healthy
+        run: |
+          curl -f http://localhost:8080/actuator/health || (docker compose logs api-gateway && exit 1)
+          curl -f http://localhost:8081/actuator/health || (docker compose logs auth-service && exit 1)
+          curl -f http://localhost:8082/actuator/health || (docker compose logs movie-service && exit 1)
+          curl -f http://localhost:8083/actuator/health || (docker compose logs review-service && exit 1)
+          echo "✅ All services healthy"
+
+      - name: Smoke test — register user
+        run: |
+          RESPONSE=$(curl -sf -w "\n%{http_code}" -X POST http://localhost:8080/api/v1/auth/register \
+            -H 'Content-Type: application/json' \
+            -d '{"username":"ci_test","email":"ci@cineverse.test","password":"Test@123","displayName":"CI Test"}')
+          STATUS=$(echo "$RESPONSE" | tail -1)
+          echo "Register status: $STATUS"
+          [ "$STATUS" = "201" ] || exit 1
+
+      - name: Smoke test — login
+        run: |
+          RESPONSE=$(curl -sf -w "\n%{http_code}" -X POST http://localhost:8080/api/v1/auth/login \
+            -H 'Content-Type: application/json' \
+            -d '{"identifier":"ci_test","password":"Test@123"}')
+          STATUS=$(echo "$RESPONSE" | tail -1)
+          echo "Login status: $STATUS"
+          [ "$STATUS" = "200" ] || exit 1
+
+      - name: Smoke test — browse movies (public)
+        run: |
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/api/v1/movies)
+          echo "Movies list status: $STATUS"
+          [ "$STATUS" = "200" ] || exit 1
+
+      - name: Dump logs on failure
+        if: failure()
+        run: docker compose logs --tail=100
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  JOB 12 — Notify on completion
+# ══════════════════════════════════════════════════════════════════════════════
+  notify:
+    name: Pipeline Summary
+    runs-on: ubuntu-latest
+    needs: [integration-tests, deploy-static]
+    if: always() && github.ref == 'refs/heads/main'
+    steps:
+      - name: Pipeline result
+        run: |
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "  CineVerse CI/CD Pipeline Done"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "  Commit : ${{ github.sha }}"
+          echo "  Branch : ${{ github.ref_name }}"
+          echo "  Actor  : ${{ github.actor }}"
+          echo "  Status : ${{ job.status }}"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

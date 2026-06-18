@@ -1,0 +1,45 @@
+name: Dependency Updates
+
+# Runs every Monday at 9am — keeps dependencies fresh
+on:
+  schedule:
+    - cron: '0 9 * * 1'
+  workflow_dispatch:
+
+jobs:
+  check-java-deps:
+    name: Check Java Dependencies
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [auth-service, movie-service, review-service, api-gateway]
+    defaults:
+      run:
+        working-directory: ${{ matrix.service }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: maven
+
+      - name: Check for dependency updates
+        run: ./mvnw versions:display-dependency-updates -B 2>&1 | grep -E "(Available|UPDATE)" || true
+
+  check-node-deps:
+    name: Check Node Dependencies
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - run: npm install -g npm-check-updates
+      - run: ncu --format group
