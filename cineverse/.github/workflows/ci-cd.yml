@@ -424,7 +424,7 @@ jobs:
             GIT_SHA=${{ github.sha }}
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  JOB 10 — Deploy Static Frontend to GitHub Pages
+#  JOB 10 — Deploy Static Frontend to GitHub Pages (gh-pages branch)
 # ══════════════════════════════════════════════════════════════════════════════
   deploy-static:
     name: Deploy Static Frontend → GitHub Pages
@@ -433,27 +433,18 @@ jobs:
     if: github.ref == 'refs/heads/main'
     permissions:
       contents: write
-      pages: write
-      id-token: write
-
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup GitHub Pages
-        uses: actions/configure-pages@v4
-
-      - name: Upload static site
-        uses: actions/upload-pages-artifact@v3
+      - name: Deploy to gh-pages branch
+        uses: peaceiris/actions-gh-pages@v3
         with:
-          path: frontend-static/
-
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./frontend-static
+          publish_branch: gh-pages
+          commit_message: "deploy: ${{ github.event.head_commit.message }}"
+          force_orphan: true
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  JOB 11 — Integration Tests (after images built)
