@@ -1,0 +1,174 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: api-gateway
+
+  cloud:
+    gateway:
+      # Global CORS configuration
+      globalcors:
+        corsConfigurations:
+          '[/**]':
+            allowedOrigins:
+              - "http://localhost:3000"
+            allowedMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+            allowedHeaders: ["*"]
+            allowCredentials: true
+            maxAge: 3600
+
+      # Route definitions
+      routes:
+        # ─── Auth Service (PUBLIC — no JWT filter) ──────────────────────────
+        - id: auth-service-public
+          uri: http://localhost:8081
+          predicates:
+            - Path=/api/v1/auth/**
+          filters:
+            - name: RequestRateLimiter
+              args:
+                redis-rate-limiter.replenishRate: 10
+                redis-rate-limiter.burstCapacity: 20
+                redis-rate-limiter.requestedTokens: 1
+                key-resolver: "#{@ipKeyResolver}"
+
+        # ─── Movie Service (PUBLIC GET, PROTECTED POST/PUT/DELETE) ──────────
+        - id: movie-service-public
+          uri: http://localhost:8082
+          predicates:
+            - Path=/api/v1/movies/**
+            - Method=GET
+          filters:
+            - name: RequestRateLimiter
+              args:
+                redis-rate-limiter.replenishRate: 50
+                redis-rate-limiter.burstCapacity: 100
+                key-resolver: "#{@ipKeyResolver}"
+
+        - id: movie-service-protected
+          uri: http://localhost:8082
+          predicates:
+            - Path=/api/v1/movies/**
+            - Method=POST,PUT,DELETE
+          filters:
+            - JwtAuthFilter
+            - name: RequestRateLimiter
+              args:
+                redis-rate-limiter.replenishRate: 20
+                redis-rate-limiter.burstCapacity: 40
+                key-resolver: "#{@userKeyResolver}"
+
+        # ─── Review Service (GET public, POST/PUT protected) ────────────────
+        - id: review-service-public
+          uri: http://localhost:8083
+          predicates:
+            - Path=/api/v1/reviews/**
+            - Method=GET
+          filters:
+            - name: RequestRateLimiter
+              args:
+                redis-rate-limiter.replenishRate: 50
+                redis-rate-limiter.burstCapacity: 100
+                key-resolver: "#{@ipKeyResolver}"
+
+        - id: review-service-protected
+          uri: http://localhost:8083
+          predicates:
+            - Path=/api/v1/reviews/**
+            - Method=POST,PUT,DELETE
+          filters:
+            - JwtAuthFilter
+            - name: RequestRateLimiter
+              args:
+                redis-rate-limiter.replenishRate: 10
+                redis-rate-limiter.burstCapacity: 20
+                key-resolver: "#{@userKeyResolver}"
+
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      password: cineverse_redis
+
+jwt:
+  secret: cineverse-super-secret-jwt-key-256-bits-long-change-in-prod
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,gateway
+
+logging:
+  level:
+    com.cineverse: DEBUG
+    org.springframework.cloud.gateway: INFO
+
+---
+spring:
+  config:
+    activate:
+      on-profile: docker
+  cloud:
+    gateway:
+      routes:
+        - id: auth-service-public
+          uri: http://auth-service:8081
+          predicates:
+            - Path=/api/v1/auth/**
+          filters:
+            - name: RequestRateLimiter
+              args:
+                redis-rate-limiter.replenishRate: 10
+                redis-rate-limiter.burstCapacity: 20
+                key-resolver: "#{@ipKeyResolver}"
+
+        - id: movie-service-public
+          uri: http://movie-service:8082
+          predicates:
+            - Path=/api/v1/movies/**
+            - Method=GET
+          filters:
+            - name: RequestRateLimiter
+              args:
+                redis-rate-limiter.replenishRate: 50
+                redis-rate-limiter.burstCapacity: 100
+                key-resolver: "#{@ipKeyResolver}"
+
+        - id: movie-service-protected
+          uri: http://movie-service:8082
+          predicates:
+            - Path=/api/v1/movies/**
+            - Method=POST,PUT,DELETE
+          filters:
+            - JwtAuthFilter
+
+        - id: review-service-public
+          uri: http://review-service:8083
+          predicates:
+            - Path=/api/v1/reviews/**
+            - Method=GET
+          filters:
+            - name: RequestRateLimiter
+              args:
+                redis-rate-limiter.replenishRate: 50
+                redis-rate-limiter.burstCapacity: 100
+                key-resolver: "#{@ipKeyResolver}"
+
+        - id: review-service-protected
+          uri: http://review-service:8083
+          predicates:
+            - Path=/api/v1/reviews/**
+            - Method=POST,PUT,DELETE
+          filters:
+            - JwtAuthFilter
+
+  data:
+    redis:
+      host: ${REDIS_HOST}
+      port: ${REDIS_PORT}
+      password: ${REDIS_PASSWORD}
+
+jwt:
+  secret: ${JWT_SECRET}

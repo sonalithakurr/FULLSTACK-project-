@@ -1,0 +1,76 @@
+server:
+  port: 8082
+
+spring:
+  application:
+    name: movie-service
+
+  datasource:
+    url: jdbc:postgresql://localhost:5433/movies_db
+    username: cineverse
+    password: cineverse_pass
+    hikari:
+      maximum-pool-size: 15
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      password: cineverse_redis
+
+  rabbitmq:
+    host: localhost
+    port: 5672
+    username: cineverse
+    password: cineverse_pass
+
+  cache:
+    type: redis
+    redis:
+      time-to-live: 600000        # Default TTL: 10 minutes
+
+# Custom cache TTLs (used in CacheConfig)
+cineverse:
+  cache:
+    movies-ttl: 600               # seconds — movie list (changes infrequently)
+    movie-detail-ttl: 3600        # 1 hour — individual movie details
+    search-ttl: 120               # 2 min — search results change more frequently
+    genres-ttl: 86400             # 24 hours — genre list is static
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+
+logging:
+  level:
+    com.cineverse: DEBUG
+
+---
+spring:
+  config:
+    activate:
+      on-profile: docker
+  datasource:
+    url: jdbc:postgresql://${DB_HOST}:${DB_PORT}/${DB_NAME}
+    username: ${DB_USER}
+    password: ${DB_PASS}
+  data:
+    redis:
+      host: ${REDIS_HOST}
+      port: ${REDIS_PORT}
+      password: ${REDIS_PASSWORD}
+  rabbitmq:
+    host: ${RABBITMQ_HOST}
+    port: ${RABBITMQ_PORT}
+    username: ${RABBITMQ_USER}
+    password: ${RABBITMQ_PASS}

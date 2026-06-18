@@ -1,0 +1,50 @@
+server:
+  port: 8083
+
+spring:
+  application:
+    name: review-service
+
+  # ─── MongoDB ─────────────────────────────────────────────────────────────────
+  data:
+    mongodb:
+      uri: mongodb://cineverse:cineverse_pass@localhost:27017/reviews_db?authSource=admin
+      auto-index-creation: true
+    redis:
+      host: localhost
+      port: 6379
+      password: cineverse_redis
+
+  rabbitmq:
+    host: localhost
+    port: 5672
+    username: cineverse
+    password: cineverse_pass
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+
+logging:
+  level:
+    com.cineverse: DEBUG
+
+---
+spring:
+  config:
+    activate:
+      on-profile: docker
+  data:
+    mongodb:
+      uri: mongodb://${MONGO_USER}:${MONGO_PASS}@${MONGO_HOST}:${MONGO_PORT}/${MONGO_DB}?authSource=admin
+    redis:
+      host: ${REDIS_HOST}
+      port: ${REDIS_PORT}
+      password: ${REDIS_PASSWORD}
+  rabbitmq:
+    host: ${RABBITMQ_HOST}
+    port: ${RABBITMQ_PORT}
+    username: ${RABBITMQ_USER}
+    password: ${RABBITMQ_PASS}

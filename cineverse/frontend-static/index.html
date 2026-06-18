@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>CineVerse 🎬</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0f0f0f;--surface:#1a1a2e;--surface2:#16213e;
+  --accent:#e50914;--gold:#f5c518;--text:#e5e5e5;
+  --muted:#a0a0a0;--border:#2a2a4a;--radius:10px;
+}
+body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,sans-serif;min-height:100vh;}
+a{text-decoration:none;color:inherit;}
+button{cursor:pointer;font-family:inherit;}
+</style>
+</head>
+<body>
+
+<!-- NAVBAR -->
+<header style="position:sticky;top:0;z-index:100;background:rgba(15,15,15,.96);backdrop-filter:blur(8px);border-bottom:1px solid var(--border);padding:0 2rem;">
+<nav style="max-width:1400px;margin:0 auto;display:flex;align-items:center;gap:1.5rem;height:64px;">
+  <a href="#" onclick="showPage('home')" style="display:flex;align-items:center;gap:.5rem;color:var(--accent);font-weight:800;font-size:1.3rem;">
+    🎬 CineVerse
+  </a>
+  <form onsubmit="doSearch(event)" style="position:relative;flex:1;max-width:400px;">
+    <input id="searchInput" type="search" placeholder="🔍  Search movies..." 
+      style="width:100%;padding:.5rem .75rem .5rem 2rem;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-size:.9rem;"
+      oninput="liveSearch(this.value)"/>
+  </form>
+  <div style="display:flex;gap:1rem;margin-left:auto;align-items:center;" id="navLinks">
+    <a href="#" onclick="showPage('home')" style="color:var(--muted);font-size:.95rem;">Home</a>
+    <a href="#" onclick="showPage('toprated')" style="color:var(--muted);font-size:.95rem;">Top Rated</a>
+    <a href="#" onclick="showPage('watchlist')" style="color:var(--muted);font-size:.95rem;">Watchlist</a>
+    <div id="authButtons"></div>
+  </div>
+</nav>
+</header>
+
+<!-- PAGES -->
+<main id="app" style="max-width:1400px;margin:0 auto;padding:1.5rem 2rem;"></main>
+
+<!-- MODAL -->
+<div id="modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:999;align-items:center;justify-content:center;">
+  <div id="modalBox" style="background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:2rem;width:90%;max-width:460px;position:relative;">
+    <button onclick="closeModal()" style="position:absolute;top:1rem;right:1rem;background:none;border:none;color:var(--muted);font-size:1.4rem;">✕</button>
+    <div id="modalContent"></div>
+  </div>
+</div>
+
+<!-- TOAST -->
+<div id="toast" style="display:none;position:fixed;bottom:2rem;right:2rem;background:#222;border:1px solid var(--border);border-radius:var(--radius);padding:.75rem 1.25rem;color:var(--text);font-size:.9rem;z-index:9999;max-width:320px;box-shadow:0 4px 20px rgba(0,0,0,.5);"></div>
+
+<script>
+// ─── DATA ─────────────────────────────────────────────────────────────────────
+const MOVIES = [
+  {id:1,title:"Inception",year:2010,rating:8.8,votes:2400,genre:["Sci-Fi","Action","Thriller"],runtime:148,pg:"PG-13",director:"Christopher Nolan",cast:["Leonardo DiCaprio","Joseph Gordon-Levitt","Ellen Page","Tom Hardy"],desc:"A thief who steals corporate secrets through dream-sharing technology is given the inverse task of planting an idea into the mind of a C.E.O.",poster:"https://image.tmdb.org/t/p/w500/9gk7adHYeDvHkCSEqAvQNLV5Uge.jpg",backdrop:"https://image.tmdb.org/t/p/w1280/s3TBrRGB1iav7gFOCNx3H31MoES.jpg",trailer:"https://www.youtube.com/watch?v=YoHD9XEInc0"},
+  {id:2,title:"The Dark Knight",year:2008,rating:9.0,votes:2800,genre:["Action","Crime","Drama"],runtime:152,pg:"PG-13",director:"Christopher Nolan",cast:["Christian Bale","Heath Ledger","Aaron Eckhart","Gary Oldman"],desc:"When the menace known as the Joker wreaks havoc and chaos on the people of Gotham, Batman must accept one of the greatest psychological and physical tests of his ability to fight injustice.",poster:"https://image.tmdb.org/t/p/w500/qJ2tW6WMUDux911r6m7haRef0WH.jpg",backdrop:"https://image.tmdb.org/t/p/w1280/hqkIcbrOHL86UncnHIsHVcVmzue.jpg",trailer:"https://www.youtube.com/watch?v=EXeTwQWrcwY"},
+  {id:3,title:"Interstellar",year:2014,rating:8.6,votes:2100,genre:["Sci-Fi","Drama","Adventure"],runtime:169,pg:"PG-13",director:"Christopher Nolan",cast:["Matthew McConaughey","Anne Hathaway","Jessica Chastain","Michael Caine"],desc:"A team of explorers travel through a wormhole in space in an attempt to ensure humanity's survival.",poster:"https://image.tmdb.org/t/p/w500/gEU2QniE6E77NI6lCU6MxlNBvIe.jpg",backdrop:"https://image.tmdb.org/t/p/w1280/xu9zaAevzQ5nnrsXN6JcahLnG4i.jpg",trailer:"https://www.youtube.com/watch?v=zSWdZVtXT7E"},
+  {id:4,title:"The Shawshank Redemption",year:1994,rating:9.3,votes:2900,genre:["Drama","Crime"],runtime:142,pg:"R",director:"Frank Darabont",cast:["Tim Robbins","Morgan Freeman","Bob Gunton","William Sadler"],desc:"Two imprisoned men bond over a number of years, finding solace and eventual redemption through acts of common decency.",poster:"https://image.tmdb.org/t/p/w500/q6y0Go1tsGEsmtFryDOJo3dEmqu.jpg",backdrop:"https://image.tmdb.org/t/p/w1280/kXfqcdQKsToO0OUXHcrrNCHDBzO.jpg",trailer:"https://www.youtube.com/watch?v=6hB3S9bIaco"},
+  {id:5,title:"Pulp Fiction",year:1994,rating:8.9,votes:2600,genre:["Crime","Drama","Thriller"],runtime:154,pg:"R",director:"Quentin Tarantino",cast:["John Travolta","Uma Thurman","Samuel L. Jackson","Bruce Willis"],desc:"The lives of two mob hitmen, a boxer, a gangster and his wife, and a pair of diner bandits interweave in four tales of violence and redemption.",poster:"https://image.tmdb.org/t/p/w500/d5iIlFn5s0ImszYzBPb8JPIfbXD.jpg",backdrop:"https://image.tmdb.org/t/p/w1280/suaEOtk1N1sgg2MTM7oZd2cfVp3.jpg",trailer:"https://www.youtube.com/watch?v=s7EdQ4FqbhY"},
+  {id:6,title:"The Matrix",year:1999,rating:8.7,votes:1900,genre:["Sci-Fi","Action"],runtime:136,pg:"R",director:"The Wachowskis",cast:["Keanu Reeves","Laurence Fishburne","Carrie-Anne Moss","Hugo Weaving"],desc:"A computer hacker learns from mysterious rebels about the true nature of his reality and his role in the war against its controllers.",poster:"https://image.tmdb.org/t/p/w500/f89U3ADr1oiB1s9GkdPOEpXUk5H.jpg",backdrop:"https://image.tmdb.org/t/p/w1280/icmmSD4vTTDKOq2vvdulafOGw93.jpg",trailer:"https://www.youtube.com/watch?v=vKQi3bBA1y8"},
+  {id:7,title:"Forrest Gump",year:1994,rating:8.8,votes:2200,genre:["Drama","Romance","Comedy"],runtime:142,pg:"PG-13",director:"Robert Zemeckis",cast:["Tom Hanks","Robin Wright","Gary Sinise","Sally Field"],desc:"The presidencies of Kennedy and Johnson, the Vietnam War, the Watergate scandal and other historical events unfold from the perspective of an Alabama man with an IQ of 75.",poster:"https://image.tmdb.org/t/p/w500/arw2vcBveWOVZr6pxd9XTd1TdQa.jpg",backdrop:"https://image.tmdb.org/t/p/w1280/7c9UVPPiTPltouxRVY6N9uugaVA.jpg",trailer:"https://www.youtube.com/watch?v=bLvqoHBptjg"},
+  {id:8,title:"Fight Club",year:1999,rating:8.8,votes:2300,genre:["Drama","Thriller"],runtime:139,pg:"R",director:"David Fincher",cast:["Brad Pitt","Edward Norton","Helena Bonham Carter"],desc:"An insomniac office worker and a devil-may-care soapmaker form an underground fight club that evolves into something much, much more.",poster:"https://image.tmdb.org/t/p/w500/pB8BM7pdSp6B6Ih7QZ4DrQ3PmJK.jpg",backdrop:"https://image.tmdb.org/t/p/w1280/rr7E0NoGKxvbkb89eR1GwfoYjpA.jpg",trailer:"https://www.youtube.com/watch?v=qtRKdVHc-cE"},
+  {id:9,title:"Goodfellas",year:1990,rating:8.7,votes:1800,genre:["Crime","Drama","Biography"],runtime:146,pg:"R",director:"Martin Scorsese",cast:["Ray Liotta","Robert De Niro","Joe Pesci","Lorraine Bracco"],desc:"The story of Henry Hill and his life in the mob, covering his relationship with his wife Karen Hill and his mob partners Jimmy Conway and Tommy DeVito.",poster:"https://image.tmdb.org/t/p/w500/aKuFiU82s5ISJpGZp7YkIr3kCUd.jpg",backdrop:"https://image.tmdb.org/t/p/w1280/sw7mordbZxgITU877yTpZCud90M.jpg",trailer:"https://www.youtube.com/watch?v=qo5jJpHtI1Y"},
+  {id:10,title:"The Silence of the Lambs",year:1991,rating:8.6,votes:1600,genre:["Crime","Drama","Thriller"],runtime:118,pg:"R",director:"Jonathan Demme",cast:["Jodie Foster","Anthony Hopkins","Scott Glenn","Ted Levine"],desc:"A young F.B.I. cadet must receive the help of an incarcerated and manipulative cannibal killer to help catch another serial killer.",poster:"https://image.tmdb.org/t/p/w500/uS9m8OBk1A8eM9I042bx8XXpqAq.jpg",backdrop:"https://image.tmdb.org/t/p/w1280/mfwq2nMBzArzQ7Y9RKE8SKeeTkg.jpg",trailer:"https://www.youtube.com/watch?v=W6Mm8Sbe__o"},
+  {id:11,title:"Avengers: Endgame",year:2019,rating:8.4,votes:1700,genre:["Action","Sci-Fi","Adventure"],runtime:181,pg:"PG-13",director:"Russo Brothers",cast:["Robert Downey Jr.","Chris Evans","Mark Ruffalo","Chris Hemsworth"],desc:"After the devastating events of Avengers: Infinity War, the universe is in ruins. With the help of remaining allies, the Avengers assemble once more.",poster:"https://image.tmdb.org/t/p/w500/or06FN3Dka5tukK1e9sl16pB3iy.jpg",backdrop:"https://image.tmdb.org/t/p/w1280/7RyHsO4yDXtBv1zUU3mTpHeQ0d5.jpg",trailer:"https://www.youtube.com/watch?v=TcMBFSGVi1c"},
+  {id:12,title:"Parasite",year:2019,rating:8.5,votes:1500,genre:["Drama","Thriller","Comedy"],runtime:132,pg:"R",director:"Bong Joon-ho",cast:["Song Kang-ho","Lee Sun-kyun","Cho Yeo-jeong","Choi Woo-shik"],desc:"Greed and class discrimination threaten the newly formed symbiotic relationship between the wealthy Park family and the destitute Kim clan.",poster:"https://image.tmdb.org/t/p/w500/7IiTTgloJzvGI1TAYymCfbfl3vT.jpg",backdrop:"https://image.tmdb.org/t/p/w1280/ApiBzeaa95TNYliSbQ8pJv4Fje7.jpg",trailer:"https://www.youtube.com/watch?v=5xH0HfJHsaY"},
+];
+</script>
+
+<script>
+// ─── STATE ────────────────────────────────────────────────────────────────────
+let currentUser = JSON.parse(localStorage.getItem('cv_user') || 'null');
+let watchlist   = JSON.parse(localStorage.getItem('cv_watchlist') || '[]');
+let reviews     = JSON.parse(localStorage.getItem('cv_reviews') || '{}');
+let users       = JSON.parse(localStorage.getItem('cv_users') || '[]');
+let currentPage = 'home';
+let currentMovieId = null;
+
+function saveState(){
+  localStorage.setItem('cv_watchlist', JSON.stringify(watchlist));
+  localStorage.setItem('cv_reviews',   JSON.stringify(reviews));
+  localStorage.setItem('cv_users',     JSON.stringify(users));
+  localStorage.setItem('cv_user',      JSON.stringify(currentUser));
+}
+
+// ─── TOAST ────────────────────────────────────────────────────────────────────
+function toast(msg, type='info'){
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.style.display = 'block';
+  el.style.borderColor = type==='error' ? 'var(--accent)' : type==='success' ? '#22c55e' : 'var(--border)';
+  clearTimeout(el._t);
+  el._t = setTimeout(()=>el.style.display='none', 3000);
+}
+
+// ─── MODAL ────────────────────────────────────────────────────────────────────
+function openModal(html){
+  document.getElementById('modalContent').innerHTML = html;
+  document.getElementById('modal').style.display = 'flex';
+}
+function closeModal(){
+  document.getElementById('modal').style.display = 'none';
+}
+document.getElementById('modal').addEventListener('click', e => {
+  if(e.target === document.getElementById('modal')) closeModal();
+});
+
+// ─── AUTH BUTTONS ─────────────────────────────────────────────────────────────
+function renderAuthButtons(){
+  const el = document.getElementById('authButtons');
+  if(currentUser){
+    el.innerHTML = `<span style="color:var(--muted);font-size:.85rem;">👤 ${currentUser.displayName}</span>
+    <button onclick="logout()" style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:.4rem .9rem;border-radius:var(--radius);font-size:.85rem;">Sign Out</button>`;
+  } else {
+    el.innerHTML = `<button onclick="showLogin()" style="background:transparent;border:1px solid var(--border);color:var(--text);padding:.4rem .9rem;border-radius:var(--radius);font-size:.85rem;margin-right:.5rem;">Sign In</button>
+    <button onclick="showRegister()" style="background:var(--accent);border:none;color:#fff;padding:.4rem .9rem;border-radius:var(--radius);font-size:.85rem;">Join Free</button>`;
+  }
+}
+</script>
+
+<script>
+// ─── AUTH LOGIC ───────────────────────────────────────────────────────────────
+function showLogin(){
+  openModal(`
+    <h2 style="font-size:1.5rem;font-weight:700;margin-bottom:.25rem;">Sign In</h2>
+    <p style="color:var(--muted);margin-bottom:1.5rem;font-size:.9rem;">Welcome back to CineVerse</p>
+    <div id="loginErr" style="display:none;color:var(--accent);background:rgba(229,9,20,.1);border:1px solid var(--accent);border-radius:8px;padding:.6rem;margin-bottom:1rem;font-size:.85rem;"></div>
+    <div style="margin-bottom:1rem;">
+      <label style="display:block;font-size:.8rem;color:var(--muted);margin-bottom:.3rem;">Email or Username</label>
+      <input id="loginId" type="text" placeholder="you@example.com" style="width:100%;padding:.6rem .8rem;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:.9rem;"/>
+    </div>
+    <div style="margin-bottom:1.5rem;">
+      <label style="display:block;font-size:.8rem;color:var(--muted);margin-bottom:.3rem;">Password</label>
+      <input id="loginPw" type="password" placeholder="••••••••" style="width:100%;padding:.6rem .8rem;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:.9rem;"/>
+    </div>
+    <button onclick="doLogin()" style="width:100%;background:var(--accent);border:none;color:#fff;padding:.7rem;border-radius:8px;font-size:.95rem;font-weight:600;">Sign In</button>
+    <p style="text-align:center;margin-top:1rem;color:var(--muted);font-size:.85rem;">No account? <a href="#" onclick="showRegister()" style="color:var(--accent);">Create one</a></p>
+  `);
+}
+
+function showRegister(){
+  openModal(`
+    <h2 style="font-size:1.5rem;font-weight:700;margin-bottom:.25rem;">Create Account</h2>
+    <p style="color:var(--muted);margin-bottom:1.5rem;font-size:.9rem;">Join CineVerse for free</p>
+    <div id="regErr" style="display:none;color:var(--accent);background:rgba(229,9,20,.1);border:1px solid var(--accent);border-radius:8px;padding:.6rem;margin-bottom:1rem;font-size:.85rem;"></div>
+    ${['regName:text:Display Name','regUser:text:Username','regEmail:email:Email','regPw:password:Password'].map(f=>{
+      const[id,type,label]=f.split(':');
+      return `<div style="margin-bottom:.9rem;"><label style="display:block;font-size:.8rem;color:var(--muted);margin-bottom:.3rem;">${label}</label>
+      <input id="${id}" type="${type}" style="width:100%;padding:.6rem .8rem;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:.9rem;"/></div>`;
+    }).join('')}
+    <button onclick="doRegister()" style="width:100%;background:var(--accent);border:none;color:#fff;padding:.7rem;border-radius:8px;font-size:.95rem;font-weight:600;margin-top:.5rem;">Create Account</button>
+    <p style="text-align:center;margin-top:1rem;color:var(--muted);font-size:.85rem;">Have an account? <a href="#" onclick="showLogin()" style="color:var(--accent);">Sign in</a></p>
+  `);
+}
+
+function doLogin(){
+  const id = document.getElementById('loginId').value.trim();
+  const pw = document.getElementById('loginPw').value;
+  const u = users.find(u => (u.email===id || u.username===id) && u.password===pw);
+  if(!u){ document.getElementById('loginErr').style.display='block'; document.getElementById('loginErr').textContent='Invalid credentials'; return; }
+  currentUser = {id:u.id, username:u.username, email:u.email, displayName:u.displayName};
+  saveState(); closeModal(); renderAuthButtons(); toast('Welcome back, '+u.displayName+'!','success');
+}
+
+function doRegister(){
+  const name=document.getElementById('regName').value.trim();
+  const user=document.getElementById('regUser').value.trim();
+  const email=document.getElementById('regEmail').value.trim();
+  const pw=document.getElementById('regPw').value;
+  const err=document.getElementById('regErr');
+  if(!name||!user||!email||!pw){err.style.display='block';err.textContent='All fields are required';return;}
+  if(pw.length<6){err.style.display='block';err.textContent='Password must be at least 6 characters';return;}
+  if(users.find(u=>u.email===email)){err.style.display='block';err.textContent='Email already registered';return;}
+  if(users.find(u=>u.username===user)){err.style.display='block';err.textContent='Username already taken';return;}
+  const newUser={id:Date.now().toString(),username:user,email,password:pw,displayName:name};
+  users.push(newUser);
+  currentUser={id:newUser.id,username:newUser.username,email:newUser.email,displayName:newUser.displayName};
+  saveState(); closeModal(); renderAuthButtons(); toast('Account created! Welcome, '+name+'!','success');
+}
+
+function logout(){
+  currentUser=null; saveState(); renderAuthButtons(); toast('Signed out'); showPage('home');
+}
+</script>
+
+<script>
+// ─── MOVIE CARD HTML ──────────────────────────────────────────────────────────
+function movieCardHTML(m){
+  const inWL = watchlist.includes(m.id);
+  return `<div class="mcard" onclick="showPage('detail',${m.id})" style="background:var(--surface);border-radius:12px;overflow:hidden;cursor:pointer;transition:transform .2s;position:relative;" onmouseover="this.style.transform='translateY(-6px)'" onmouseout="this.style.transform='translateY(0)'">
+    <div style="position:relative;aspect-ratio:2/3;overflow:hidden;">
+      <img src="${m.poster}" alt="${m.title}" style="width:100%;height:100%;object-fit:cover;" loading="lazy" onerror="this.src='https://via.placeholder.com/300x450/1a1a2e/e5e5e5?text=No+Poster'"/>
+      <div style="position:absolute;bottom:0;left:0;right:0;padding:.4rem .5rem;background:linear-gradient(transparent,rgba(0,0,0,.85));">
+        <span style="font-size:.7rem;color:var(--muted);">${m.genre.slice(0,2).join(' · ')}</span>
+      </div>
+      <button onclick="event.stopPropagation();toggleWatchlist(${m.id})" style="position:absolute;top:.5rem;right:.5rem;background:rgba(0,0,0,.7);border:none;border-radius:50%;width:32px;height:32px;font-size:1rem;display:flex;align-items:center;justify-content:center;" title="${inWL?'Remove from watchlist':'Add to watchlist'}">
+        ${inWL?'🔖':'➕'}
+      </button>
+    </div>
+    <div style="padding:.75rem;">
+      <div style="font-weight:600;font-size:.9rem;margin-bottom:.25rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${m.title}</div>
+      <div style="display:flex;align-items:center;gap:.5rem;font-size:.8rem;color:var(--muted);">
+        <span>${m.year}</span>
+        <span style="color:var(--gold);">⭐ ${m.rating}</span>
+        <span style="border:1px solid var(--border);padding:0 .3rem;border-radius:3px;font-size:.7rem;">${m.pg}</span>
+      </div>
+    </div>
+  </div>`;
+}
+
+function toggleWatchlist(id){
+  if(!currentUser){ toast('Sign in to manage your watchlist','error'); return; }
+  if(watchlist.includes(id)){
+    watchlist = watchlist.filter(x=>x!==id); toast('Removed from watchlist');
+  } else {
+    watchlist.push(id); toast('Added to watchlist ✓','success');
+  }
+  saveState(); showPage(currentPage, currentMovieId);
+}
+</script>
+
+<script>
+// ─── PAGES ────────────────────────────────────────────────────────────────────
+function showPage(page, movieId){
+  currentPage = page; currentMovieId = movieId || null;
+  const app = document.getElementById('app');
+
+  if(page === 'home'){
+    const recent = [...MOVIES].sort((a,b)=>b.year-a.year).slice(0,8);
+    const top    = [...MOVIES].sort((a,b)=>b.rating-a.rating).slice(0,8);
+    app.innerHTML = `
+      <!-- HERO -->
+      <section style="text-align:center;padding:5rem 1rem 3rem;background:linear-gradient(135deg,#0f0f0f,#1a0505);border-radius:16px;margin-bottom:3rem;">
+        <div style="font-size:3rem;margin-bottom:.5rem;">🎬</div>
+        <h1 style="font-size:clamp(1.8rem,5vw,3rem);font-weight:800;margin-bottom:.75rem;">Discover Your Next<br><span style="color:var(--accent);">Favorite Film</span></h1>
+        <p style="color:var(--muted);font-size:1.05rem;margin-bottom:2rem;">Browse ${MOVIES.length} movies, read reviews, and build your watchlist.</p>
+        <button onclick="showPage('browse')" style="background:var(--accent);border:none;color:#fff;padding:.8rem 2rem;border-radius:10px;font-size:1rem;font-weight:700;cursor:pointer;">Browse All Movies →</button>
+      </section>
+      <!-- NEW RELEASES -->
+      <section style="margin-bottom:3rem;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1.25rem;">
+          <h2 style="font-size:1.4rem;font-weight:700;">New Releases</h2>
+          <a href="#" onclick="showPage('browse')" style="color:var(--accent);font-size:.9rem;">See all →</a>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:1.25rem;">
+          ${recent.map(movieCardHTML).join('')}
+        </div>
+      </section>
+      <!-- TOP RATED -->
+      <section style="margin-bottom:3rem;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1.25rem;">
+          <h2 style="font-size:1.4rem;font-weight:700;">⭐ Top Rated</h2>
+          <a href="#" onclick="showPage('toprated')" style="color:var(--accent);font-size:.9rem;">See all →</a>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:1.25rem;">
+          ${top.map(movieCardHTML).join('')}
+        </div>
+      </section>
+      <!-- GENRES -->
+      <section style="margin-bottom:3rem;">
+        <h2 style="font-size:1.4rem;font-weight:700;margin-bottom:1.25rem;">Browse by Genre</h2>
+        <div style="display:flex;flex-wrap:wrap;gap:.75rem;">
+          ${['Action','Drama','Sci-Fi','Crime','Thriller','Comedy','Romance','Biography'].map(g=>`
+            <button onclick="showPage('genre','${g}')" style="background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:.5rem 1.25rem;border-radius:99px;font-size:.9rem;cursor:pointer;transition:all .2s;" onmouseover="this.style.borderColor='var(--accent)'" onmouseout="this.style.borderColor='var(--border)'">${g}</button>
+          `).join('')}
+        </div>
+      </section>`;
+  }
+
+  else if(page === 'browse'){
+    app.innerHTML = `
+      <h1 style="font-size:1.8rem;font-weight:800;margin-bottom:1.5rem;">All Movies</h1>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:1.25rem;">
+        ${MOVIES.map(movieCardHTML).join('')}
+      </div>`;
+  }
+
+  else if(page === 'toprated'){
+    const sorted = [...MOVIES].sort((a,b)=>b.rating-a.rating);
+    app.innerHTML = `
+      <h1 style="font-size:1.8rem;font-weight:800;margin-bottom:1.5rem;">⭐ Top Rated Movies</h1>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:1.25rem;">
+        ${sorted.map(movieCardHTML).join('')}
+      </div>`;
+  }
+
+  else if(page === 'genre'){
+    const filtered = MOVIES.filter(m=>m.genre.includes(movieId));
+    app.innerHTML = `
+      <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;">
+        <button onclick="showPage('home')" style="background:var(--surface);border:1px solid var(--border);color:var(--muted);padding:.4rem .9rem;border-radius:8px;font-size:.85rem;">← Back</button>
+        <h1 style="font-size:1.8rem;font-weight:800;">${movieId} Movies</h1>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:1.25rem;">
+        ${filtered.length ? filtered.map(movieCardHTML).join('') : '<p style="color:var(--muted);">No movies found in this genre.</p>'}
+      </div>`;
+  }
+
+  else if(page === 'watchlist'){
+    const wlMovies = MOVIES.filter(m=>watchlist.includes(m.id));
+    app.innerHTML = `
+      <h1 style="font-size:1.8rem;font-weight:800;margin-bottom:1.5rem;">🔖 My Watchlist</h1>
+      ${!currentUser ? '<p style="color:var(--muted);">Please <a href="#" onclick="showLogin()" style="color:var(--accent);">sign in</a> to see your watchlist.</p>' :
+        wlMovies.length ? `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:1.25rem;">${wlMovies.map(movieCardHTML).join('')}</div>` :
+        '<p style="color:var(--muted);">Your watchlist is empty. Browse movies and click ➕ to add them!</p>'
+      }`;
+  }
+
+  else if(page === 'search'){
+    const q = movieId.toLowerCase();
+    const results = MOVIES.filter(m=>m.title.toLowerCase().includes(q)||m.genre.some(g=>g.toLowerCase().includes(q))||m.director.toLowerCase().includes(q));
+    app.innerHTML = `
+      <h1 style="font-size:1.8rem;font-weight:800;margin-bottom:.5rem;">Search results for "<span style="color:var(--accent);">${movieId}</span>"</h1>
+      <p style="color:var(--muted);margin-bottom:1.5rem;">${results.length} result${results.length!==1?'s':''} found</p>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:1.25rem;">
+        ${results.length ? results.map(movieCardHTML).join('') : '<p style="color:var(--muted);">No movies matched your search.</p>'}
+      </div>`;
+  }
+
+  else if(page === 'detail'){ showDetail(movieId); }
+}
+
+function liveSearch(q){
+  if(q.trim().length > 1) showPage('search', q.trim());
+  else if(q.trim().length === 0) showPage('home');
+}
+function doSearch(e){ e.preventDefault(); const q=document.getElementById('searchInput').value.trim(); if(q) showPage('search',q); }
+</script>
+
+<script>
+// ─── DETAIL PAGE ──────────────────────────────────────────────────────────────
+function showDetail(id){
+  const m = MOVIES.find(x=>x.id===id);
+  if(!m) return;
+  const inWL = watchlist.includes(m.id);
+  const movieReviews = reviews[m.id] || [];
+  const avgRating = movieReviews.length ? (movieReviews.reduce((s,r)=>s+r.rating,0)/movieReviews.length).toFixed(1) : m.rating;
+  const app = document.getElementById('app');
+  app.innerHTML = `
+    ${m.backdrop ? `<div style="width:100%;height:320px;background:url('${m.backdrop}') center/cover;border-radius:16px;margin-bottom:2rem;position:relative;overflow:hidden;">
+      <div style="position:absolute;inset:0;background:linear-gradient(to bottom,transparent 40%,var(--bg));"></div>
+    </div>` : ''}
+    <div style="display:flex;gap:2.5rem;margin-bottom:2.5rem;flex-wrap:wrap;">
+      <div style="flex-shrink:0;">
+        <img src="${m.poster}" alt="${m.title}" style="width:220px;border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,.6);" onerror="this.src='https://via.placeholder.com/220x330/1a1a2e/e5e5e5?text=No+Poster'"/>
+        <button onclick="toggleWatchlist(${m.id})" style="width:220px;margin-top:.75rem;background:${inWL?'var(--surface2)':'var(--accent)'};border:${inWL?'1px solid var(--border)':'none'};color:var(--text);padding:.65rem;border-radius:10px;font-size:.9rem;font-weight:600;cursor:pointer;">
+          ${inWL ? '🔖 In Watchlist' : '➕ Add to Watchlist'}
+        </button>
+        ${m.trailer ? `<a href="${m.trailer}" target="_blank" style="display:block;width:220px;margin-top:.5rem;background:var(--surface);border:1px solid var(--border);color:var(--text);padding:.65rem;border-radius:10px;font-size:.9rem;font-weight:600;text-align:center;">▶ Watch Trailer</a>` : ''}
+      </div>
+      <div style="flex:1;min-width:260px;">
+        <button onclick="showPage('home')" style="background:none;border:1px solid var(--border);color:var(--muted);padding:.3rem .8rem;border-radius:8px;font-size:.8rem;margin-bottom:1rem;cursor:pointer;">← Back</button>
+        <h1 style="font-size:2.2rem;font-weight:800;margin-bottom:.75rem;">${m.title}</h1>
+        <div style="display:flex;flex-wrap:wrap;gap:.5rem;margin-bottom:1.25rem;">
+          <span style="background:var(--accent);padding:.2rem .7rem;border-radius:99px;font-size:.8rem;">${m.pg}</span>
+          ${m.genre.map(g=>`<span style="background:var(--surface2);border:1px solid var(--border);padding:.2rem .7rem;border-radius:99px;font-size:.8rem;">${g}</span>`).join('')}
+        </div>
+        <div style="display:flex;gap:2rem;margin-bottom:1.5rem;color:var(--muted);font-size:.95rem;">
+          <div><span style="color:var(--gold);font-size:1.2rem;font-weight:700;">⭐ ${avgRating}</span><span style="font-size:.8rem;margin-left:.3rem;">/10 (${movieReviews.length||m.votes} ratings)</span></div>
+          <div>🕐 ${m.runtime} min</div>
+          <div>📅 ${m.year}</div>
+        </div>
+        <p style="color:var(--muted);line-height:1.8;margin-bottom:1.5rem;font-size:.95rem;">${m.desc}</p>
+        <div style="margin-bottom:1rem;"><strong style="color:var(--muted);font-size:.85rem;">DIRECTOR</strong><p style="margin-top:.25rem;">${m.director}</p></div>
+        <div><strong style="color:var(--muted);font-size:.85rem;">CAST</strong>
+          <div style="display:flex;flex-wrap:wrap;gap:.5rem;margin-top:.4rem;">
+            ${m.cast.map(c=>`<span style="background:var(--surface2);padding:.2rem .7rem;border-radius:99px;font-size:.85rem;">${c}</span>`).join('')}
+          </div>
+        </div>
+      </div>
+    </div>
+    <!-- REVIEWS -->
+    <div style="border-top:1px solid var(--border);padding-top:2rem;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1.5rem;">
+        <h2 style="font-size:1.4rem;font-weight:700;">Reviews ${movieReviews.length ? '('+movieReviews.length+')' : ''}</h2>
+        ${currentUser ? `<button onclick="showReviewForm(${m.id})" style="background:var(--accent);border:none;color:#fff;padding:.5rem 1.25rem;border-radius:8px;font-size:.9rem;font-weight:600;cursor:pointer;">✍ Write a Review</button>` : `<a href="#" onclick="showLogin()" style="color:var(--accent);font-size:.9rem;">Sign in to review</a>`}
+      </div>
+      <div id="reviewList">
+        ${movieReviews.length===0 ? '<p style="color:var(--muted);">No reviews yet. Be the first!</p>' : movieReviews.map(r=>`
+          <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1.25rem;margin-bottom:1rem;">
+            <div style="display:flex;align-items:center;gap:1rem;margin-bottom:.5rem;">
+              <span style="font-weight:600;">${r.displayName}</span>
+              <span style="color:var(--gold);">⭐ ${r.rating}/10</span>
+              ${r.spoiler?'<span style="background:rgba(229,9,20,.15);color:var(--accent);padding:.1rem .5rem;border-radius:99px;font-size:.75rem;">⚠ Spoilers</span>':''}
+              <span style="color:var(--muted);font-size:.8rem;margin-left:auto;">${new Date(r.date).toLocaleDateString()}</span>
+            </div>
+            <h3 style="font-size:1rem;font-weight:600;margin-bottom:.4rem;">${r.title}</h3>
+            <p style="color:var(--muted);line-height:1.7;font-size:.9rem;">${r.content}</p>
+          </div>`).join('')}
+      </div>
+    </div>`;
+}
+
+function showReviewForm(movieId){
+  openModal(`
+    <h2 style="font-size:1.3rem;font-weight:700;margin-bottom:1.5rem;">Write a Review</h2>
+    <div id="rvErr" style="display:none;color:var(--accent);font-size:.85rem;margin-bottom:1rem;"></div>
+    <div style="margin-bottom:1rem;">
+      <label style="display:block;font-size:.8rem;color:var(--muted);margin-bottom:.3rem;">Rating (1–10) *</label>
+      <div style="display:flex;gap:.3rem;" id="starRow">
+        ${[1,2,3,4,5,6,7,8,9,10].map(n=>`<button type="button" id="star${n}" onclick="setStars(${n})" style="background:var(--surface2);border:1px solid var(--border);color:var(--muted);width:32px;height:32px;border-radius:6px;font-size:.8rem;cursor:pointer;">${n}</button>`).join('')}
+      </div>
+      <input type="hidden" id="rvRating" value="0"/>
+    </div>
+    <div style="margin-bottom:.9rem;">
+      <label style="display:block;font-size:.8rem;color:var(--muted);margin-bottom:.3rem;">Review Title *</label>
+      <input id="rvTitle" type="text" maxlength="150" style="width:100%;padding:.6rem .8rem;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:.9rem;"/>
+    </div>
+    <div style="margin-bottom:.9rem;">
+      <label style="display:block;font-size:.8rem;color:var(--muted);margin-bottom:.3rem;">Your Review *</label>
+      <textarea id="rvContent" rows="4" maxlength="2000" style="width:100%;padding:.6rem .8rem;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:.9rem;resize:vertical;"></textarea>
+    </div>
+    <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:1.25rem;">
+      <input type="checkbox" id="rvSpoiler"/>
+      <label for="rvSpoiler" style="font-size:.85rem;color:var(--muted);">Contains spoilers</label>
+    </div>
+    <button onclick="submitReview(${movieId})" style="width:100%;background:var(--accent);border:none;color:#fff;padding:.7rem;border-radius:8px;font-size:.95rem;font-weight:600;cursor:pointer;">Submit Review</button>
+  `);
+}
+
+function setStars(n){
+  document.getElementById('rvRating').value = n;
+  for(let i=1;i<=10;i++){
+    const btn = document.getElementById('star'+i);
+    if(btn){ btn.style.background = i<=n ? 'var(--gold)' : 'var(--surface2)'; btn.style.color = i<=n ? '#000' : 'var(--muted)'; }
+  }
+}
+
+function submitReview(movieId){
+  const rating = parseInt(document.getElementById('rvRating').value);
+  const title  = document.getElementById('rvTitle').value.trim();
+  const content= document.getElementById('rvContent').value.trim();
+  const spoiler= document.getElementById('rvSpoiler').checked;
+  const err    = document.getElementById('rvErr');
+  if(rating===0){err.style.display='block';err.textContent='Please select a rating';return;}
+  if(!title){err.style.display='block';err.textContent='Please add a title';return;}
+  if(content.length<10){err.style.display='block';err.textContent='Review must be at least 10 characters';return;}
+  if(!reviews[movieId]) reviews[movieId]=[];
+  if(reviews[movieId].find(r=>r.userId===currentUser.id)){err.style.display='block';err.textContent='You already reviewed this movie';return;}
+  reviews[movieId].push({userId:currentUser.id,displayName:currentUser.displayName,rating,title,content,spoiler,date:Date.now()});
+  saveState(); closeModal(); toast('Review submitted! ✓','success'); showPage('detail',movieId);
+}
+</script>
+
+<script>
+// ─── INIT ─────────────────────────────────────────────────────────────────────
+renderAuthButtons();
+showPage('home');
+</script>
+</body>
+</html>

@@ -1,0 +1,259 @@
+version: '3.8'
+
+services:
+  # ─── DATABASES ─────────────────────────────────────────────────────────────
+
+  postgres-auth:
+    image: postgres:15-alpine
+    container_name: cineverse-postgres-auth
+    environment:
+      POSTGRES_DB: auth_db
+      POSTGRES_USER: cineverse
+      POSTGRES_PASSWORD: cineverse_pass
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_auth_data:/var/lib/postgresql/data
+      - ./database/postgres/auth-schema.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - cineverse-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cineverse -d auth_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  postgres-movies:
+    image: postgres:15-alpine
+    container_name: cineverse-postgres-movies
+    environment:
+      POSTGRES_DB: movies_db
+      POSTGRES_USER: cineverse
+      POSTGRES_PASSWORD: cineverse_pass
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_movies_data:/var/lib/postgresql/data
+      - ./database/postgres/movies-schema.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - cineverse-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cineverse -d movies_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  mongodb:
+    image: mongo:6-jammy
+    container_name: cineverse-mongodb
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: cineverse
+      MONGO_INITDB_ROOT_PASSWORD: cineverse_pass
+      MONGO_INITDB_DATABASE: reviews_db
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+      - ./database/mongo/init.js:/docker-entrypoint-initdb.d/init.js
+    networks:
+      - cineverse-network
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─── CACHE ──────────────────────────────────────────────────────────────────
+
+  redis:
+    image: redis:7-alpine
+    container_name: cineverse-redis
+    command: redis-server --requirepass cineverse_redis --maxmemory 256mb --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - cineverse-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "cineverse_redis", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─── MESSAGE BROKER ─────────────────────────────────────────────────────────
+
+  rabbitmq:
+    image: rabbitmq:3.12-management-alpine
+    container_name: cineverse-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: cineverse
+      RABBITMQ_DEFAULT_PASS: cineverse_pass
+    ports:
+      - "5672:5672"   # AMQP
+      - "15672:15672" # Management UI
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    networks:
+      - cineverse-network
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─── MICROSERVICES ──────────────────────────────────────────────────────────
+
+  auth-service:
+    build:
+      context: ./auth-service
+      dockerfile: Dockerfile
+    container_name: cineverse-auth-service
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      DB_HOST: postgres-auth
+      DB_PORT: 5432
+      DB_NAME: auth_db
+      DB_USER: cineverse
+      DB_PASS: cineverse_pass
+      JWT_SECRET: cineverse-super-secret-jwt-key-256-bits-long-change-in-prod
+      JWT_EXPIRY_MS: 86400000
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: cineverse_redis
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USER: cineverse
+      RABBITMQ_PASS: cineverse_pass
+    ports:
+      - "8081:8081"
+    depends_on:
+      postgres-auth:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - cineverse-network
+    restart: unless-stopped
+
+  movie-service:
+    build:
+      context: ./movie-service
+      dockerfile: Dockerfile
+    container_name: cineverse-movie-service
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      DB_HOST: postgres-movies
+      DB_PORT: 5432
+      DB_NAME: movies_db
+      DB_USER: cineverse
+      DB_PASS: cineverse_pass
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: cineverse_redis
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USER: cineverse
+      RABBITMQ_PASS: cineverse_pass
+    ports:
+      - "8082:8082"
+    depends_on:
+      postgres-movies:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - cineverse-network
+    restart: unless-stopped
+
+  review-service:
+    build:
+      context: ./review-service
+      dockerfile: Dockerfile
+    container_name: cineverse-review-service
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      MONGO_HOST: mongodb
+      MONGO_PORT: 27017
+      MONGO_DB: reviews_db
+      MONGO_USER: cineverse
+      MONGO_PASS: cineverse_pass
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USER: cineverse
+      RABBITMQ_PASS: cineverse_pass
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: cineverse_redis
+    ports:
+      - "8083:8083"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - cineverse-network
+    restart: unless-stopped
+
+  # ─── API GATEWAY ────────────────────────────────────────────────────────────
+
+  api-gateway:
+    build:
+      context: ./api-gateway
+      dockerfile: Dockerfile
+    container_name: cineverse-api-gateway
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      AUTH_SERVICE_URL: http://auth-service:8081
+      MOVIE_SERVICE_URL: http://movie-service:8082
+      REVIEW_SERVICE_URL: http://review-service:8083
+      JWT_SECRET: cineverse-super-secret-jwt-key-256-bits-long-change-in-prod
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: cineverse_redis
+    ports:
+      - "8080:8080"
+    depends_on:
+      - auth-service
+      - movie-service
+      - review-service
+    networks:
+      - cineverse-network
+    restart: unless-stopped
+
+  # ─── FRONTEND ───────────────────────────────────────────────────────────────
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: cineverse-frontend
+    environment:
+      REACT_APP_API_BASE_URL: http://localhost:8080
+    ports:
+      - "3000:80"
+    depends_on:
+      - api-gateway
+    networks:
+      - cineverse-network
+    restart: unless-stopped
+
+# ─── VOLUMES ──────────────────────────────────────────────────────────────────
+
+volumes:
+  postgres_auth_data:
+  postgres_movies_data:
+  mongodb_data:
+  redis_data:
+  rabbitmq_data:
+
+# ─── NETWORKS ─────────────────────────────────────────────────────────────────
+
+networks:
+  cineverse-network:
+    driver: bridge

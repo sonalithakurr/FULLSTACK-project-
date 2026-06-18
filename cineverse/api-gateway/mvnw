@@ -1,0 +1,4 @@
+#!/bin/sh
+# Maven Wrapper Script
+# Download and run the Maven wrapper binary
+exec "$(dirname "$0")/.mvn/wrapper/mvnw" "$@"
